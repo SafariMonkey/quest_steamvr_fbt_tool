@@ -23,7 +23,6 @@ from qsft.probe.session import ConsoleInput, Every, QuestLink, Ticker, load_conf
 from qsft.recording import NullRecorder, Recorder, default_path, now_ns
 
 MAX_TRACKERS = 8
-MAX_FLOOR_LIFT_M = 0.5  # larger floor corrections are almost certainly a missing/odd SteamVR room setup
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -74,22 +73,6 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
     def on_head(msg) -> None:
         pos, rot = flip_handedness(np.array(msg.args[:3], float), unity_matrix_from_euler(msg.args[3:6]))
         pairer.add_head(msg.t, msg.bundle_time, Pose(pos, rot))
-
-    # Floor: VRChat's floor (y = 0) comes from the Quest and was ~20 cm above the real floor in testing,
-    # leaving feet below it. SteamVR's floor matched reality, so by default the trackers are lifted so that
-    # SteamVR's floor lands on VRChat's. It's read once, in raw space, so later playspace moves by the
-    # PCVR player can't shift it.
-    r2s = session.raw_to_standing()
-    floor_raw_y = float(cfg.get("steamvr_floor_raw_y", -r2s[1][3]))
-    align_floor = bool(cfg.get("align_floor", True))
-    if align_floor and np.allclose(r2s, np.eye(4)[:3], atol=1e-4) and "steamvr_floor_raw_y" not in cfg:
-        log("SteamVR has no room setup (standing pose is identity); floor alignment disabled")
-        align_floor = False
-    height_offset = float(cfg.get("height_offset_m", 0.0))
-    rec.write("floor", floor_raw_y=floor_raw_y, align=align_floor, height_offset=height_offset)
-    if align_floor:
-        log(f"Aligning SteamVR's floor (raw y {floor_raw_y:.3f}) with VRChat's floor")
-    floor_warned = False
 
     link = QuestLink(rec, cfg, name="QSFT", on_head=on_head)
     console = ConsoleInput()
@@ -149,15 +132,6 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
                 if target:
                     log(f"Sending trackers to {target[0]}:{target[1]}")
 
-            lift = height_offset
-            if align_floor and cal.X is not None:
-                floor_lift = -(cal.X.pos[1] + floor_raw_y)  # X is yaw-only, so the floor's y is just shifted
-                if abs(floor_lift) <= MAX_FLOOR_LIFT_M:
-                    lift += floor_lift
-                elif not floor_warned:
-                    floor_warned = True
-                    log(f"Floor alignment would move trackers {floor_lift:+.2f} m; ignoring it "
-                        "(check SteamVR's room setup, or set align_floor = false)")
             if cal.X is not None and sender:
                 predicted = session.poses(RAW, predict_s) if predict_s else poses
                 messages, tx = [], {}
@@ -167,7 +141,6 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
                         continue
                     q = cal.X @ Pose(*matrix34_to_pos_rot(predicted[i].mDeviceToAbsoluteTracking))
                     pos_u, rot_u = flip_handedness(q.pos, q.rot)
-                    pos_u[1] += lift
                     euler = unity_euler_from_matrix(rot_u)
                     messages += [(f"/tracking/trackers/{n}/position", pos_u.tolist()),
                                  (f"/tracking/trackers/{n}/rotation", euler.tolist())]
@@ -181,7 +154,7 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
                 x = cal.X
                 xs = f"yaw {np.degrees(_yaw(x.rot)):.1f} deg, offset {np.round(x.pos, 2).tolist()} m" if x else "none yet"
                 ms = f"lever arm {np.linalg.norm(cal.M.pos) * 100:.1f} cm" if cal.M else "not solved"
-                print(f"  calibration: {cal.state} | alignment {xs} | mount {ms} | height lift {lift:+.2f} m", flush=True)
+                print(f"  calibration: {cal.state} | alignment {xs} | mount {ms}", flush=True)
                 states = []
                 for serial in trackers:
                     i = dmap.index.get(serial)
