@@ -376,7 +376,7 @@ Decided:
 For later:
 - UI: tray, console or local web page.
 - In-headset feedback for Person B:
-  - The VRChat chatbox via OSC works but is visible to the whole instance.
+  - Not the VRChat chatbox (ruled out: everyone in the instance would see it).
   - Avatar parameters need avatar changes.
   - The PC speakers are another option.
 - Packaging: fix CI on the fork, or keep running from source.
