@@ -4,8 +4,9 @@ Run: uv run python -m qsft.bridge   (settings come from qsft.toml)
 
 While the calibration tracker is on the headset, the Lighthouse -> Quest alignment is kept up to
 date from VRChat's head pose. Pause it ('p') or switch the tracker off to keep the last alignment.
-Console: p = pause/resume calibration, m = re-solve the mount offset, q = quit; any other text
-marks the recording.
+Console: p = pause/resume calibration, m = re-solve the mount offset, +/- = raise/lower trackers
+1 cm, h = one VRChat head alignment (test), q = quit; any other text marks the recording.
+In VR: alternate fist and thumbs-up 10 times on one hand to adjust tracker height (see BRIDGE.md).
 """
 
 import argparse
@@ -14,12 +15,15 @@ from pathlib import Path
 import numpy as np
 import openvr
 
+import queue
+
+from qsft.adjust import Bob, GestureAdjuster
 from qsft.calibration import Calibrator, Pairer, Pose, _yaw
 from qsft.coords import flip_handedness, matrix34_to_pos_rot, unity_euler_from_matrix, unity_matrix_from_euler
 from qsft.openvr_io import RAW, OpenVRSession, pose_record
 from qsft.osc_io import OscSender
 from qsft.probe.commands import DeviceMap
-from qsft.probe.session import ConsoleInput, Every, QuestLink, Ticker, load_config, log
+from qsft.probe.session import ConsoleInput, Every, QuestLink, Ticker, head_alignment_pulse, load_config, log
 from qsft.recording import NullRecorder, Recorder, default_path, now_ns
 
 MAX_TRACKERS = 8
@@ -94,14 +98,27 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
         log(f"Aligning SteamVR's floor (raw y {floor_raw_y:.3f}) with VRChat's floor")
     floor_warned = False
 
-    link = QuestLink(rec, cfg, name="QSFT", on_head=on_head)
+    adjuster = GestureAdjuster(args.calibration_file.with_name("vrchat_offset.json"))
+    if adjuster.offset is not None:
+        log(f"Using the saved in-VR height adjustment: {adjuster.offset:+.3f} m")
+    bob = Bob()
+    gestures: queue.SimpleQueue = queue.SimpleQueue()
+    head_pulse_sent = False
+
+    def on_avatar_param(name: str, value) -> None:
+        if name in ("GestureLeft", "GestureRight") and isinstance(value, int):
+            gestures.put(("left" if name == "GestureLeft" else "right", value))
+
+    link = QuestLink(rec, cfg, name="QSFT", on_head=on_head, on_avatar_param=on_avatar_param)
     console = ConsoleInput()
     ticker, status, refresh = Ticker(args.rate), Every(2.0), Every(5.0)
     sender, target = None, None
+    auto_lift = 0.0
     sent = 0
     log(f"Forwarding {', '.join(f'{s} as tracker {n}' for n, s in enumerate(trackers, 1))}; "
         f"calibrating with {calib_serial}")
-    log("Commands: p = pause/resume calibration, m = re-solve mount offset, q = quit")
+    log("Commands: p = pause/resume calibration, m = re-solve mount offset, +/- = height 1 cm, "
+        "h = one VRChat head alignment (test), q = quit")
     try:
         while True:
             for line in console.lines():
@@ -114,6 +131,20 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
                 elif cmd == "m":
                     cal.reset_mount()
                     log("Re-solving the mount offset: move your head around (turn, nod, tilt)")
+                elif cmd in ("+", "-"):
+                    adjuster.start_from(auto_lift)
+                    adjuster.nudge(0.01 if cmd == "+" else -0.01)
+                    log(f"Tracker height adjustment now {adjuster.offset:+.3f} m (saved)")
+                elif cmd == "h":
+                    pulse = head_alignment_pulse(link)
+                    if pulse is None or sender is None:
+                        log("Can't send a head alignment yet (no head pose or no Quest target)")
+                    else:
+                        sender.send(pulse)
+                        head_pulse_sent = True
+                        rec.write("head_pulse", messages=pulse)
+                        log("Sent one VRChat head alignment; height corrections are off for this session "
+                            "so the result shows unaltered. Compare a controller held against a tracker.")
                 elif line:
                     log(f"Marked: {line}")
                 rec.write("mark", text=line)
@@ -152,15 +183,42 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
                 if target:
                     log(f"Sending trackers to {target[0]}:{target[1]}")
 
-            lift = height_offset
+            # Height correction, in order of preference: the in-VR adjustment (what Person B sees),
+            # else the SteamVR-floor estimate. A head alignment test turns both off.
+            auto_lift = 0.0
             if align_floor and cal.X is not None:
                 floor_lift = -(cal.X.pos[1] + floor_raw_y)  # X is yaw-only, so the floor's y is just shifted
                 if abs(floor_lift) <= MAX_FLOOR_LIFT_M:
-                    lift += floor_lift
+                    auto_lift = floor_lift
                 elif not floor_warned:
                     floor_warned = True
                     log(f"Floor alignment would move trackers {floor_lift:+.2f} m; ignoring it "
                         "(check SteamVR's room setup, or set align_floor = false)")
+            while not gestures.empty():
+                hand, value = gestures.get()
+                event = adjuster.on_gesture(hand, value)
+                if event == "enter":
+                    adjuster.start_from(auto_lift)
+                if event:
+                    bob.start(event)
+                    rec.write("adjust", event=event, offset=adjuster.offset)
+                    log("In-VR height adjust mode ON: make a fist and move that hand up/down" if event == "enter"
+                        else f"In-VR height adjust mode OFF; saved {adjuster.offset:+.3f} m")
+            for hand in ("left", "right"):
+                wrist = link.latest_pose(f"/tracking/vrsystem/{hand}wrist/pose")
+                if wrist is not None:
+                    adjuster.on_wrist(hand, float(wrist[0][1]))
+            if adjuster.check_idle():
+                bob.start("exit")
+                rec.write("adjust", event="exit (idle)", offset=adjuster.offset)
+                log(f"In-VR height adjust mode OFF (idle); saved {adjuster.offset:+.3f} m")
+            if head_pulse_sent:
+                lift, lift_source = 0.0, "none (head alignment test)"
+            elif adjuster.offset is not None:
+                lift, lift_source = adjuster.offset, "in-VR adjustment"
+            else:
+                lift, lift_source = auto_lift, "SteamVR floor estimate" if auto_lift else "none"
+            lift += height_offset + bob.lift()
             if cal.X is not None and sender:
                 predicted = session.poses(RAW, predict_s) if predict_s else poses
                 messages, tx = [], {}
@@ -184,7 +242,9 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
                 x = cal.X
                 xs = f"yaw {np.degrees(_yaw(x.rot)):.1f} deg, offset {np.round(x.pos, 2).tolist()} m" if x else "none yet"
                 ms = f"lever arm {np.linalg.norm(cal.M.pos) * 100:.1f} cm" if cal.M else "not solved"
-                print(f"  calibration: {cal.state} | alignment {xs} | mount {ms} | height lift {lift:+.2f} m", flush=True)
+                print(f"  calibration: {cal.state} | alignment {xs} | mount {ms}", flush=True)
+                print(f"  height lift {lift:+.3f} m ({lift_source})"
+                      + (" | ADJUST MODE: fist + move hand up/down" if adjuster.active else ""), flush=True)
                 states = []
                 for serial in trackers:
                     i = dmap.index.get(serial)

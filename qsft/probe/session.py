@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-from qsft.coords import unity_matrix_from_euler
+from qsft.coords import unity_euler_from_matrix, unity_matrix_from_euler
 from qsft.osc_io import OscReceiver, ReceivedMessage
 from qsft.oscquery import (
     OSC_SERVICE,
@@ -122,6 +122,19 @@ class StreamStats:
         return len(recent) / STATS_WINDOW_S, max(gaps) / 1e6
 
 
+def head_alignment_pulse(link: "QuestLink") -> list[tuple[str, list[float]]] | None:
+    """One-off VRChat head alignment from the head pose VRChat itself reports (single messages snap).
+
+    VRChat shifts the OSC tracker space so this position lands on the avatar's head bone, and turns it
+    to this heading; any alignment it held before (e.g. a cached one) is replaced.
+    """
+    head = link.head()
+    if head is None:
+        return None
+    yaw = float(unity_euler_from_matrix(head.rot)[1])
+    return [("/tracking/trackers/head/position", head.pos.tolist()), ("/tracking/trackers/head/rotation", [0.0, yaw, 0.0])]
+
+
 class QuestLink:
     """Advertises over OSCQuery, receives VRChat's tracking output, and watches for VRChat clients."""
 
@@ -134,9 +147,11 @@ class QuestLink:
     def __init__(
         self, recorder: Recorder, cfg: dict, tree: str = "typed", name: str = "QSFT-Probe",
         on_head: Callable[[ReceivedMessage], None] | None = None,
+        on_avatar_param: Callable[[str, object], None] | None = None,
     ):
         self._rec = recorder
         self._on_head_cb = on_head
+        self._on_avatar_param = on_avatar_param
         self._started = time.monotonic()
         self._queried_by: set[str] = set()
         self.quest_ip: str | None = cfg.get("quest_ip") or None
@@ -228,7 +243,13 @@ class QuestLink:
             items = sorted(self.stats.items())
         if not items:
             lines.append("  no OSC received yet")
+        avatar = [(ip, st) for (ip, address), st in items if address.startswith("/avatar/")]
+        if avatar:
+            ips = sorted({ip for ip, _ in avatar})
+            lines.append(f"  {', '.join(ips)} /avatar/*: {len(avatar)} addresses, {sum(st.count for _, st in avatar)} messages")
         for (ip, address), st in items:
+            if address.startswith("/avatar/"):
+                continue
             rate, gap = st.window(now)
             where = "LOCAL (this PC)" if self.is_local(ip) else ip
             values = ", ".join(f"{v:.3f}" if isinstance(v, float) else repr(v) for v in st.last_args)
@@ -262,6 +283,8 @@ class QuestLink:
             self._on_head(msg)
             if self._on_head_cb and self.is_quest(ip):
                 self._on_head_cb(msg)
+        elif msg.address.startswith("/avatar/parameters/") and msg.args and self._on_avatar_param and self.is_quest(ip):
+            self._on_avatar_param(msg.address.removeprefix("/avatar/parameters/"), msg.args[0])
 
     def _on_head(self, msg: ReceivedMessage) -> None:
         ip = msg.src[0]

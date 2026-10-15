@@ -54,6 +54,7 @@ def route_ip(towards: str | None) -> str | None:
 def build_address_space(tree: str) -> OSCAddressSpace:
     """`typed` mirrors VRChat's own receiver sample; `bare` mirrors SlimeVR (one empty container node)."""
     space = OSCAddressSpace()
+    space.add_node(OSCPathNode("/avatar"))  # VRChat then sends avatar parameters (incl. hand gestures)
     if tree == "bare":
         space.add_node(OSCPathNode("/tracking/vrsystem"))
         return space

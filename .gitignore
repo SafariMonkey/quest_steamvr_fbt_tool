@@ -165,3 +165,4 @@ qsft_config.ini
 qsft.toml
 recordings/
 calibration.json
+vrchat_offset.json

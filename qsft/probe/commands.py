@@ -9,7 +9,7 @@ from scipy.spatial.transform import Rotation
 from qsft.coords import matrix34_to_pos_rot, unity_euler_from_matrix, yaw_matrix
 from qsft.openvr_io import RAW, STANDING, OpenVRSession, pose_record
 from qsft.osc_io import OscSender
-from qsft.probe.session import ConsoleInput, Every, QuestLink, Ticker, log
+from qsft.probe.session import ConsoleInput, Every, QuestLink, Ticker, head_alignment_pulse, log
 from qsft.recording import Recorder, now_ns
 
 
@@ -309,6 +309,15 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
             state["mode"] = "fixed"
         elif cmd[0] in ("w", "wrist"):
             state["mode"] = "wrist"
+        elif cmd[0] == "h":
+            pulse = head_alignment_pulse(link)
+            if pulse is None or sender is None:
+                log("Can't send a head alignment yet (no head pose or no Quest target)")
+            else:
+                sender.send(pulse)
+                rec.write("head_pulse", messages=pulse)
+                log(f"Sent one head alignment: {pulse}")
+            return True
         elif cmd[0] in ("x", "y", "z"):
             state["spin"] = cmd[0]
         elif cmd[0] in ("0", "nospin"):
@@ -330,7 +339,8 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
         log(f"mode={state['mode']} spin={state['spin']} rate={state['rate']} Hz bundle={state['bundle']}")
         return True
 
-    log("Commands: f(ollow) | a(nchor) | w(rist) | fixed | x / y / z (spin about that axis) | 0 (no spin) | rate N | bundle | q")
+    log("Commands: f(ollow) | a(nchor) | w(rist) | fixed | x / y / z (spin about that axis) | 0 (no spin) | "
+        "h (one head alignment) | rate N | bundle | q")
     if state["mode"] == "anchor":
         take_anchor()
     try:

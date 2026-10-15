@@ -23,11 +23,21 @@ Setup is the same as for the probe ([PROBE.md](PROBE.md), one-time setup):
 - **Console commands:**
   - `p`: pause or resume calibration.
   - `m`: re-solve the mount offset, e.g. after re-mounting the tracker differently.
+  - `+` / `-`: raise or lower the trackers 1 cm.
+  - `h`: one VRChat head alignment (experiment; see Height below).
   - `q`: quit.
   - Any other text marks the recording.
 - **Height:** VRChat draws incoming trackers about 21 cm below the coordinates it reports the headset and controllers in. That gap is the same as the height of its reported floor above the real floor. The bridge raises the trackers by that gap, measured from SteamVR's floor, and the status line shows it as `height lift`. If trackers and controllers ever disagree in height, `send-test` wrist mode (PROBE.md) measures the gap directly.
-  - To fine-tune, set `height_offset_m` in `qsft.toml`.
-  - To turn the correction off, set `align_floor = false`.
+  - **Adjusting in VR:** on one hand, hold grip and trigger, then lift your thumb off the controller and put it back 10 times within 8 s. VRChat sees this as alternating Fist and ThumbsUp.
+    - The trackers bob twice: you're in adjust mode.
+    - Make a fist and move that hand up or down: the whole tracker space moves with it. Open your hand to let go.
+    - Repeat the 10 thumb lifts to finish; the trackers bob once. Adjust mode also ends after a minute without dragging.
+    - The result is saved in `vrchat_offset.json` and used from then on, instead of the SteamVR-floor estimate.
+    - Known limitation: this relies on the controller's capacitive thumb sensing, which often fails on worn controllers. It's fine on Quest Pro controllers for now, but needs a sturdier trigger long term.
+  - **From the PC:** `+` and `-` (then Enter) raise or lower the trackers 1 cm (saved).
+  - **Experiment:** `h` sends VRChat one head alignment, taken from the head pose VRChat reports, and turns the height correction off for the session. This replaces any alignment VRChat may have cached. Afterwards, check whether a controller and a tracker held together line up, are still about 21 cm apart, or are now some other distance apart.
+  - To fine-tune by a fixed amount, set `height_offset_m` in `qsft.toml`.
+  - To turn the SteamVR-floor estimate off, set `align_floor = false`.
 - **Tuning:**
   - `--predict-ms N` (default 30) extrapolates the trackers ahead to hide Wi-Fi and VRChat delay. Lower it if the trackers jitter or overshoot; raise it if they lag.
   - `--head-lead-ms N` (default 40) is how far VRChat's head pose runs ahead of real time.
