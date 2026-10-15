@@ -1,11 +1,14 @@
 """Probe commands. Each serves one or more hardware tests in INVESTIGATION.md section 4."""
 
 import math
+import queue
 import time
+from pathlib import Path
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from qsft.adjust import Bob, GestureAdjuster
 from qsft.coords import matrix34_to_pos_rot, unity_euler_from_matrix, yaw_matrix
 from qsft.openvr_io import RAW, STANDING, OpenVRSession, pose_record
 from qsft.osc_io import OscSender
@@ -280,9 +283,21 @@ WRIST_ADDRESSES = ("/tracking/vrsystem/rightwrist/pose", "/tracking/vrsystem/lef
 
 
 def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
-    link = QuestLink(rec, cfg, tree=args.tree)
+    # Wrist mode doubles as a height calibration: the in-VR gesture adjustment (see qsft.adjust) shifts the
+    # wrist trackers, and the saved value (vrchat_offset.json, as used by the bridge) is the offset at
+    # which they sit on the controllers.
+    adjuster = GestureAdjuster(Path("vrchat_offset.json"))
+    bob = Bob()
+    gestures: queue.SimpleQueue = queue.SimpleQueue()
+
+    def on_avatar_param(name: str, value) -> None:
+        if name in ("GestureLeft", "GestureRight") and isinstance(value, int):
+            gestures.put(("left" if name == "GestureLeft" else "right", value))
+
+    link = QuestLink(rec, cfg, tree=args.tree, on_avatar_param=on_avatar_param)
     console = ConsoleInput()
-    state = {"mode": args.mode, "spin": None, "rate": args.rate, "bundle": not args.no_bundle, "anchor": None}
+    state = {"mode": args.mode, "spin": None, "rate": args.rate, "bundle": not args.no_bundle, "anchor": None,
+             "head_pulse": False}
     ticker, status = Ticker(state["rate"]), Every(2.0)
     sender, target = None, None
     t0 = time.perf_counter()
@@ -315,9 +330,13 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
                 log("Can't send a head alignment yet (no head pose or no Quest target)")
             else:
                 sender.send(pulse)
+                state["head_pulse"] = True
                 rec.write("head_pulse", messages=pulse)
-                log(f"Sent one head alignment: {pulse}")
+                log(f"Sent one head alignment: {pulse}; wrist-mode height offset off from now on")
             return True
+        elif cmd[0] in ("+", "-"):
+            adjuster.nudge(0.01 if cmd[0] == "+" else -0.01)
+            log(f"Height offset now {adjuster.offset:+.3f} m (saved)")
         elif cmd[0] in ("x", "y", "z"):
             state["spin"] = cmd[0]
         elif cmd[0] in ("0", "nospin"):
@@ -340,7 +359,7 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
         return True
 
     log("Commands: f(ollow) | a(nchor) | w(rist) | fixed | x / y / z (spin about that axis) | 0 (no spin) | "
-        "h (one head alignment) | rate N | bundle | q")
+        "h (one head alignment) | +/- (wrist height 1 cm) | rate N | bundle | q")
     if state["mode"] == "anchor":
         take_anchor()
     try:
@@ -355,11 +374,27 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
                 log(f"Sending to {target[0]}:{target[1]}" if target else "No Quest target yet (set quest_ip, or wait for mDNS)")
             if state["mode"] == "anchor" and state["anchor"] is None:
                 take_anchor()
+            while not gestures.empty():
+                event = adjuster.on_gesture(*gestures.get())
+                if event:
+                    bob.start(event)
+                    rec.write("adjust", event=event, offset=adjuster.offset)
+                    log("Height adjust mode ON: fist on one hand + move it; watch the OTHER hand's tracker"
+                        if event == "enter" else f"Height adjust mode OFF; saved {adjuster.offset:+.3f} m")
+            for hand, address in zip(("right", "left"), WRIST_ADDRESSES):
+                wrist = link.latest_pose(address)
+                if wrist is not None:
+                    adjuster.on_wrist(hand, float(wrist[0][1]))
+            if adjuster.check_idle():
+                bob.start("exit")
+                log(f"Height adjust mode OFF (idle); saved {adjuster.offset:+.3f} m")
             if state["mode"] == "wrist":
-                # Trackers exactly where VRChat says the controllers are: if VRChat places OSC trackers in the
-                # same space it reports poses in, the tracker models sit on the controllers.
-                poses = [link.latest_pose(a) for a in WRIST_ADDRESSES]
-                pose = poses[0]
+                # Trackers exactly where VRChat says the controllers are (plus the height offset, if any): if
+                # VRChat places OSC trackers in the space it reports poses in, the models sit on the controllers.
+                lift = (0.0 if state["head_pulse"] else (adjuster.offset or 0.0)) + bob.lift()
+                poses = [(p[0] + np.array([0.0, lift, 0.0]), p[1]) if p is not None else None
+                         for p in (link.latest_pose(a) for a in WRIST_ADDRESSES)]
+                pose = poses[0] or poses[1]
             else:
                 pose = synthetic_tracker_pose(
                     state["mode"], state["spin"], link.head(), state["anchor"], args.fixed_pos, time.perf_counter() - t0
@@ -382,6 +417,9 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
                 waiting = "" if pose is not None else "  (waiting for a head pose)"
                 print(f"  sending: mode={state['mode']} spin={state['spin']} rate={state['rate']} Hz "
                       f"bundle={state['bundle']} target={target}{waiting}", flush=True)
+                if state["mode"] == "wrist":
+                    offset = "off (head alignment sent)" if state["head_pulse"] else f"{adjuster.offset or 0.0:+.3f} m"
+                    print(f"  wrist height offset: {offset}" + (" | ADJUST MODE" if adjuster.active else ""), flush=True)
             ticker.wait()
     finally:
         if sender:

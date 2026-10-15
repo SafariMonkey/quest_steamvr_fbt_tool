@@ -113,7 +113,8 @@ Keep `listen` running and do each of these, typing a mark first:
 | `y` | It turns left and right about its vertical axis |
 | `z` | It rolls about the axis pointing at your face |
 | `0` | Stops spinning |
-| `w` (wrist) | Tracker 1 sits exactly where VRChat reports your right controller, tracker 2 your left. If VRChat places incoming trackers in the same space it reports poses in, the tracker models sit on your controllers. If not, note the gap, and whether it changes with your hands near the floor, at your waist and above your head (constant gap = offset; growing with height = scale) |
+| `h` | Sends VRChat one head alignment, from the head pose it reports, and turns the wrist height offset off. Use with `w`: do the trackers now sit on the controllers? |
+| `w` (wrist) | Tracker 1 sits exactly where VRChat reports your right controller, tracker 2 your left, raised by the saved height offset if there is one. You can use the in-VR height adjustment here (BRIDGE.md): drag with one hand while watching the *other* hand's tracker, until both sit on their controllers. The bridge uses the saved value. `+` / `-` nudge it by 1 cm. If VRChat places incoming trackers in the same space it reports poses in, the tracker models sit on your controllers. If not, note the gap, and whether it changes with your hands near the floor, at your waist and above your head (constant gap = offset; growing with height = scale) |
 | `a` (anchor) | It stays fixed in the room 50 cm in front of where your head was. Walk around it, and try thumbstick movement (mark what happens) |
 | `rate 30`, `rate 60`, `rate 120`, `bundle` | Compare smoothness. `bundle` toggles between one combined packet and separate ones |
 | `send-test --mode fixed --quest-ip <IP>` | Works without the head pose: a tracker at (0, 1, 0.5) in VRChat's playspace |

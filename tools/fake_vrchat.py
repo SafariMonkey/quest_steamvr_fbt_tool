@@ -7,7 +7,9 @@ It mimics VRChat's documented OSC/OSCQuery behaviour, not its exact implementati
 - prints the OSC tracker messages it receives.
 
 Usage: uv run python tools/fake_vrchat.py [--ip IP] [--rate 72]
-Type 'j' + Enter to simulate a tracking-origin jump (recentre), 'q' to quit.
+Type 'j' + Enter to simulate a tracking-origin jump (recentre), 'g' to play the gesture sequence that
+toggles the bridge's height adjust mode (ending in a fist), 'u' to raise the right hand 5 cm, 'o' to open
+the right hand, 'q' to quit.
 """
 
 import argparse
@@ -103,21 +105,37 @@ def main() -> None:
             print(f"Sending head/wrist poses to {host.get('NAME')} at {target[0]}:{target[1]}")
 
     browser = ServiceBrowser(zc, [OSCJSON_SERVICE], handlers=[on_change])
-    jump = {"offset": 0.0}
+    jump = {"offset": 0.0, "right_y": 0.0}
+
+    def send_gesture(value: int) -> None:
+        m = OscMessageBuilder("/avatar/parameters/GestureRight")
+        m.add_arg(value)
+        for target in targets.snapshot():
+            sock.sendto(m.build().dgram, target)
+
+    def gesture_sequence() -> None:
+        for k in range(11):  # Fist/ThumbsUp x10 switches, ending on Fist
+            send_gesture(1 if k % 2 == 0 else 7)
+            time.sleep(0.3)
 
     def console() -> None:
         for line in sys.stdin:
             cmd = line.strip().lower()
-            if cmd == "j":
+            if cmd == "g":
+                threading.Thread(target=gesture_sequence, daemon=True).start()
+            elif cmd == "u":
+                jump["right_y"] += 0.05
+            elif cmd == "o":
+                send_gesture(2)
+            elif cmd == "j":
                 jump["offset"] += 0.5
                 print(f"Simulated origin jump: x offset now {jump['offset']} m")
             elif cmd == "q":
                 stop.set()
 
     stop = threading.Event()
-    threading.Thread(target=console, daemon=True).start()
-
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    threading.Thread(target=console, daemon=True).start()
     t0 = time.perf_counter()
     next_print = time.monotonic() + 2
     try:
@@ -131,7 +149,7 @@ def main() -> None:
             for address, values in (
                 ("/tracking/vrsystem/head/pose", head),
                 ("/tracking/vrsystem/leftwrist/pose", [head[0] - 0.3, 1.0, head[2], 0.0, 0.0, 0.0]),
-                ("/tracking/vrsystem/rightwrist/pose", [head[0] + 0.3, 1.0, head[2], 0.0, 0.0, 0.0]),
+                ("/tracking/vrsystem/rightwrist/pose", [head[0] + 0.3, 1.0 + jump["right_y"], head[2], 0.0, 0.0, 0.0]),
             ):
                 m = OscMessageBuilder(address)
                 for v in values:
