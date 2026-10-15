@@ -17,8 +17,10 @@ calibration_tracker = "LHR-33333333"
 # UDP port to receive VRChat's OSC on. Optional: by default, any free port.
 # osc_port = 9101
 
-# Bridge: raise the trackers so SteamVR's floor lands on VRChat's floor (default true). VRChat's floor
-# comes from the Quest and may not match the real floor.
+# Bridge height correction (see BRIDGE.md). Default: raise the trackers so SteamVR's floor lands on
+# VRChat's floor. Alternative: head_align = true echoes VRChat's head position back so VRChat aligns
+# the tracker space to the avatar's head itself (replaces floor alignment).
 # align_floor = true
+# head_align = false
 # Extra height adjustment for forwarded trackers, in metres (default 0).
 # height_offset_m = 0.0

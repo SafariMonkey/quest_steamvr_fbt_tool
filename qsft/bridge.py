@@ -75,10 +75,13 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
         pos, rot = flip_handedness(np.array(msg.args[:3], float), unity_matrix_from_euler(msg.args[3:6]))
         pairer.add_head(msg.t, msg.bundle_time, Pose(pos, rot))
 
-    # Floor: VRChat's floor (y = 0) comes from the Quest and was ~20 cm above the real floor in testing,
-    # leaving feet below it. SteamVR's floor matched reality, so by default the trackers are lifted so that
-    # SteamVR's floor lands on VRChat's. It's read once, in raw space, so later playspace moves by the
-    # PCVR player can't shift it.
+    # Height: VRChat's head-pose output put the real floor ~20 cm below y = 0, and forwarded trackers
+    # showed up ~20 cm below the Quest's own controllers. So the output space seems offset from the
+    # space VRChat places trackers in. By default the trackers are lifted so the real floor (SteamVR's,
+    # which matched the trackers' real heights) lands on VRChat's floor; that cancels the offset if
+    # VRChat's floor matches the real one. head_align is the alternative: echo VRChat's head position
+    # back (as SlimeVR does) and let VRChat align the tracker space to the avatar's head itself.
+    # SteamVR's floor is read once, in raw space, so later playspace moves by the PCVR player can't shift it.
     r2s = session.raw_to_standing()
     floor_raw_y = float(cfg.get("steamvr_floor_raw_y", -r2s[1][3]))
     align_floor = bool(cfg.get("align_floor", True))
@@ -86,7 +89,11 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
         log("SteamVR has no room setup (standing pose is identity); floor alignment disabled")
         align_floor = False
     height_offset = float(cfg.get("height_offset_m", 0.0))
-    rec.write("floor", floor_raw_y=floor_raw_y, align=align_floor, height_offset=height_offset)
+    head_align = bool(cfg.get("head_align", False))
+    if head_align and align_floor:
+        log("head_align is on: VRChat aligns the tracker space to the head, so floor alignment is off")
+        align_floor = False
+    rec.write("floor", floor_raw_y=floor_raw_y, align=align_floor, height_offset=height_offset, head_align=head_align)
     if align_floor:
         log(f"Aligning SteamVR's floor (raw y {floor_raw_y:.3f}) with VRChat's floor")
     floor_warned = False
@@ -172,6 +179,10 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
                     messages += [(f"/tracking/trackers/{n}/position", pos_u.tolist()),
                                  (f"/tracking/trackers/{n}/rotation", euler.tolist())]
                     tx[serial] = [*np.round(pos_u, 4).tolist(), *np.round(euler, 2).tolist()]
+                if head_align:
+                    head = link.head()
+                    if head is not None and now_ns() - head.t < 200_000_000:
+                        messages.append(("/tracking/trackers/head/position", head.pos.tolist()))
                 if messages:
                     sender.send(messages)
                     rec.write("tx", d=tx)

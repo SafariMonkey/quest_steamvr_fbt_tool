@@ -25,10 +25,11 @@ Setup is the same as for the probe ([PROBE.md](PROBE.md), one-time setup):
   - `m`: re-solve the mount offset, e.g. after re-mounting the tracker differently.
   - `q`: quit.
   - Any other text marks the recording.
-- **Height:** the bridge raises the trackers so SteamVR's floor lines up with VRChat's floor, because the two needn't agree. In testing, the Quest's floor was about 20 cm above the real floor, which left the feet below VRChat's floor. The status line shows this as `height lift`.
-  - To fine-tune, set `height_offset_m` in `qsft.toml`.
-  - To turn the correction off, set `align_floor = false`.
-  - Re-setting the floor in the Quest's boundary settings would also fix your eye height in VRChat. The bridge adapts either way.
+- **Height:** the head pose VRChat reports appears to sit about 20 cm lower than where VRChat actually draws things. Uncorrected, forwarded trackers showed up about 20 cm below the Quest's own controllers. There are two ways to correct it:
+  - **Floor alignment (default):** raises the trackers so the real floor (SteamVR's) lands on VRChat's floor. This works if VRChat's floor matches your real floor: a controller resting on the real floor should look like it's on VRChat's floor. The status line shows it as `height lift`.
+  - **Head alignment:** set `head_align = true` in `qsft.toml`. The bridge sends VRChat's own head position back (as SlimeVR does), and VRChat aligns the tracker space to your avatar's head itself. This replaces floor alignment.
+  - **Checking:** hold a controller against a tracker. They should line up. If neither option gets them to agree, send the recording.
+  - **Manual adjustment:** `height_offset_m` adds a fixed adjustment in metres, and `align_floor = false` turns floor alignment off.
 - **Tuning:**
   - `--predict-ms N` (default 30) extrapolates the trackers ahead to hide Wi-Fi and VRChat delay. Lower it if the trackers jitter or overshoot; raise it if they lag.
   - `--head-lead-ms N` (default 40) is how far VRChat's head pose runs ahead of real time.
