@@ -276,6 +276,9 @@ def synthetic_tracker_pose(mode: str, spin: str | None, head, anchor, fixed_pos,
     return pos, rot
 
 
+WRIST_ADDRESSES = ("/tracking/vrsystem/rightwrist/pose", "/tracking/vrsystem/leftwrist/pose")
+
+
 def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
     link = QuestLink(rec, cfg, tree=args.tree)
     console = ConsoleInput()
@@ -304,6 +307,8 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
             take_anchor()
         elif cmd[0] == "fixed":
             state["mode"] = "fixed"
+        elif cmd[0] in ("w", "wrist"):
+            state["mode"] = "wrist"
         elif cmd[0] in ("x", "y", "z"):
             state["spin"] = cmd[0]
         elif cmd[0] in ("0", "nospin"):
@@ -325,7 +330,7 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
         log(f"mode={state['mode']} spin={state['spin']} rate={state['rate']} Hz bundle={state['bundle']}")
         return True
 
-    log("Commands: f(ollow) | a(nchor) | fixed | x / y / z (spin about that axis) | 0 (no spin) | rate N | bundle | q")
+    log("Commands: f(ollow) | a(nchor) | w(rist) | fixed | x / y / z (spin about that axis) | 0 (no spin) | rate N | bundle | q")
     if state["mode"] == "anchor":
         take_anchor()
     try:
@@ -340,17 +345,27 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
                 log(f"Sending to {target[0]}:{target[1]}" if target else "No Quest target yet (set quest_ip, or wait for mDNS)")
             if state["mode"] == "anchor" and state["anchor"] is None:
                 take_anchor()
-            pose = synthetic_tracker_pose(
-                state["mode"], state["spin"], link.head(), state["anchor"], args.fixed_pos, time.perf_counter() - t0
-            )
-            if pose is not None and sender:
-                pos, rot = pose
-                euler = unity_euler_from_matrix(rot)
-                sender.send(
-                    [("/tracking/trackers/1/position", pos.tolist()), ("/tracking/trackers/1/rotation", euler.tolist())],
-                    bundle=state["bundle"],
+            if state["mode"] == "wrist":
+                # Trackers exactly where VRChat says the controllers are: if VRChat places OSC trackers in the
+                # same space it reports poses in, the tracker models sit on the controllers.
+                poses = [link.latest_pose(a) for a in WRIST_ADDRESSES]
+                pose = poses[0]
+            else:
+                pose = synthetic_tracker_pose(
+                    state["mode"], state["spin"], link.head(), state["anchor"], args.fixed_pos, time.perf_counter() - t0
                 )
-                rec.write("tx", p=np.round(pos, 5).tolist(), e=np.round(euler, 3).tolist(), bundle=state["bundle"])
+                poses = [pose]
+            if pose is not None and sender:
+                messages, tx = [], []
+                for n, p in enumerate(poses, 1):
+                    if p is None:
+                        continue
+                    euler = unity_euler_from_matrix(p[1])
+                    messages += [(f"/tracking/trackers/{n}/position", p[0].tolist()),
+                                 (f"/tracking/trackers/{n}/rotation", euler.tolist())]
+                    tx.append([n, *np.round(p[0], 5).tolist(), *np.round(euler, 3).tolist()])
+                sender.send(messages, bundle=state["bundle"])
+                rec.write("tx", d=tx, bundle=state["bundle"])
             if status.due():
                 for line in link.status_lines():
                     print(line, flush=True)

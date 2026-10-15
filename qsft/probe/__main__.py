@@ -36,7 +36,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("send-test", help="H4: send a synthetic OSC tracker to the Quest")
     add_link_options(p)
-    p.add_argument("--mode", choices=("follow", "anchor", "fixed"), default="follow")
+    p.add_argument("--mode", choices=("follow", "anchor", "wrist", "fixed"), default="follow")
     p.add_argument("--rate", type=float, default=90.0, help="send rate in Hz (default 90)")
     p.add_argument("--no-bundle", action="store_true", help="send position and rotation as separate packets")
     p.add_argument("--fixed-pos", type=float, nargs=3, default=(0.0, 1.0, 0.5), metavar=("X", "Y", "Z"),

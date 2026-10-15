@@ -203,6 +203,16 @@ class QuestLink:
     def is_quest(self, ip: str) -> bool:
         return ip == self.quest_ip if self.quest_ip else not self.is_local(ip)
 
+    def latest_pose(self, address: str, max_age_s: float = 0.5) -> tuple[np.ndarray, np.ndarray] | None:
+        """Latest (Unity position, rotation matrix) the Quest sent on a /tracking/vrsystem/*/pose address."""
+        now = now_ns()
+        with self._lock:
+            for (ip, a), st in self.stats.items():
+                if a == address and self.is_quest(ip) and len(st.last_args) == 6 and now - st.arrivals[-1] < max_age_s * 1e9:
+                    args = st.last_args
+                    return np.array(args[:3], dtype=float), unity_matrix_from_euler(args[3:6])
+        return None
+
     def head(self) -> HeadPose | None:
         """Latest head pose from the Quest (configured IP, else any non-local sender)."""
         with self._lock:
