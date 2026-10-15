@@ -122,17 +122,26 @@ class StreamStats:
         return len(recent) / STATS_WINDOW_S, max(gaps) / 1e6
 
 
-def head_alignment_pulse(link: "QuestLink") -> list[tuple[str, list[float]]] | None:
+MIN_HEAD_HEIGHT_FOR_ALIGNMENT_M = 1.0
+
+
+def head_alignment_pulse(link: "QuestLink") -> tuple[list[tuple[str, list[float]]] | None, str]:
     """One-off VRChat head alignment from the head pose VRChat itself reports (single messages snap).
 
     VRChat shifts the OSC tracker space so this position lands on the avatar's head bone, and turns it
-    to this heading; any alignment it held before (e.g. a cached one) is replaced.
+    to this heading; any alignment it held before (e.g. a cached one) is replaced. It's only meaningful
+    while the headset is worn and the avatar follows it, so it refuses when the head looks set down.
+    Returns (messages, "") or (None, reason).
     """
     head = link.head()
     if head is None:
-        return None
+        return None, "no head pose from the Quest yet"
+    if head.pos[1] < MIN_HEAD_HEIGHT_FOR_ALIGNMENT_M:
+        return None, (f"the head is only {head.pos[1]:.2f} m up; wear the headset, stand upright and "
+                      "look ahead, then try again")
     yaw = float(unity_euler_from_matrix(head.rot)[1])
-    return [("/tracking/trackers/head/position", head.pos.tolist()), ("/tracking/trackers/head/rotation", [0.0, yaw, 0.0])]
+    return [("/tracking/trackers/head/position", head.pos.tolist()),
+            ("/tracking/trackers/head/rotation", [0.0, yaw, 0.0])], ""
 
 
 class QuestLink:

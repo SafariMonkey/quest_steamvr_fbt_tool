@@ -325,9 +325,9 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
         elif cmd[0] in ("w", "wrist"):
             state["mode"] = "wrist"
         elif cmd[0] == "h":
-            pulse = head_alignment_pulse(link)
+            pulse, why = head_alignment_pulse(link)
             if pulse is None or sender is None:
-                log("Can't send a head alignment yet (no head pose or no Quest target)")
+                log(f"Not sending a head alignment: {why or 'no Quest target yet'}")
             else:
                 sender.send(pulse)
                 state["head_pulse"] = True

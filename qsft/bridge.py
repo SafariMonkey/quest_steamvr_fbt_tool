@@ -136,9 +136,9 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
                     adjuster.nudge(0.01 if cmd == "+" else -0.01)
                     log(f"Tracker height adjustment now {adjuster.offset:+.3f} m (saved)")
                 elif cmd == "h":
-                    pulse = head_alignment_pulse(link)
+                    pulse, why = head_alignment_pulse(link)
                     if pulse is None or sender is None:
-                        log("Can't send a head alignment yet (no head pose or no Quest target)")
+                        log(f"Not sending a head alignment: {why or 'no Quest target yet'}")
                     else:
                         sender.send(pulse)
                         head_pulse_sent = True

@@ -35,7 +35,7 @@ Setup is the same as for the probe ([PROBE.md](PROBE.md), one-time setup):
     - The result is saved in `vrchat_offset.json` and used from then on, instead of the SteamVR-floor estimate.
     - Known limitation: this relies on the controller's capacitive thumb sensing, which often fails on worn controllers. It's fine on Quest Pro controllers for now, but needs a sturdier trigger long term.
   - **From the PC:** `+` and `-` (then Enter) raise or lower the trackers 1 cm (saved).
-  - **Experiment:** `h` sends VRChat one head alignment, taken from the head pose VRChat reports, and turns the height correction off for the session. This replaces any alignment VRChat may have cached. Afterwards, check whether a controller and a tracker held together line up, are still about 21 cm apart, or are now some other distance apart.
+  - **Experiment:** only while wearing the headset, standing upright and looking ahead (the bridge refuses otherwise), `h` sends VRChat one head alignment, taken from the head pose VRChat reports, and turns the height correction off for the session. This replaces any alignment VRChat may have cached. Afterwards, check whether a controller and a tracker held together line up, are still about 21 cm apart, or are now some other distance apart.
   - To fine-tune by a fixed amount, set `height_offset_m` in `qsft.toml`.
   - To turn the SteamVR-floor estimate off, set `align_floor = false`.
 - **Tuning:**
