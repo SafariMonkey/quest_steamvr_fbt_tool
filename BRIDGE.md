@@ -25,6 +25,9 @@ Setup is the same as for the probe ([PROBE.md](PROBE.md), one-time setup):
   - `m`: re-solve the mount offset, e.g. after re-mounting the tracker differently.
   - `q`: quit.
   - Any other text marks the recording.
+- **Height:** VRChat draws incoming trackers about 21 cm below the coordinates it reports the headset and controllers in. That gap is the same as the height of its reported floor above the real floor. The bridge raises the trackers by that gap, measured from SteamVR's floor, and the status line shows it as `height lift`. If trackers and controllers ever disagree in height, `send-test` wrist mode (PROBE.md) measures the gap directly.
+  - To fine-tune, set `height_offset_m` in `qsft.toml`.
+  - To turn the correction off, set `align_floor = false`.
 - **Tuning:**
   - `--predict-ms N` (default 30) extrapolates the trackers ahead to hide Wi-Fi and VRChat delay. Lower it if the trackers jitter or overshoot; raise it if they lag.
   - `--head-lead-ms N` (default 40) is how far VRChat's head pose runs ahead of real time.

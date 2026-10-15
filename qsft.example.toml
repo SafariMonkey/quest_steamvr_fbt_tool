@@ -16,3 +16,9 @@ calibration_tracker = "LHR-33333333"
 
 # UDP port to receive VRChat's OSC on. Optional: by default, any free port.
 # osc_port = 9101
+
+# Bridge: VRChat draws incoming trackers ~21 cm below the coordinates it reports poses in; the bridge
+# lifts them so the real floor (SteamVR's) lands at VRChat's y = 0 (default true). See BRIDGE.md.
+# align_floor = true
+# Extra height adjustment for forwarded trackers, in metres (default 0).
+# height_offset_m = 0.0
