@@ -28,3 +28,49 @@ def test_vrchat_clock_decodes_mis_scaled_fractions():
     decoded = np.array([clock.decode(t) for t in tags])
     assert np.allclose(decoded, true, atol=1e-6)
     assert np.all(np.diff(decoded) > 0)
+
+
+def _cal(tmp_path, M):
+    from qsft.calibration import Calibrator
+    cal = Calibrator(tmp_path / "cal.json")
+    cal._add_solve(M, {"pos_median_cm": 0.3}, now=0.0)
+    return cal
+
+
+def _mount(arm_cm, yaw_deg=0.0):
+    return Pose(np.array([0.0, 0.0, arm_cm / 100]), Rotation.from_euler("y", yaw_deg, degrees=True).as_matrix())
+
+
+def test_old_solves_fade(tmp_path):
+    cal = _cal(tmp_path, _mount(8.0))
+    for k in range(4):
+        cal._add_solve(_mount(8.0), {"pos_median_cm": 0.3}, now=10.0 * k)
+    cal.consider_solve(_mount(9.0), {"pos_median_cm": 0.3}, now=3600.0)  # an hour later (e.g. next session)
+    assert abs(np.linalg.norm(cal.M.pos) * 100 - 9.0) < 0.05
+
+
+def test_small_differences_average_in(tmp_path):
+    cal = _cal(tmp_path, _mount(8.0))
+    cal.consider_solve(_mount(8.4), {"pos_median_cm": 0.3}, now=1.0)
+    small = np.linalg.norm(cal.M.pos) * 100 - 8.0
+    cal2 = _cal(tmp_path, _mount(8.0))
+    cal2.consider_solve(_mount(9.2), {"pos_median_cm": 0.3}, now=1.0)
+    larger = np.linalg.norm(cal2.M.pos) * 100 - 8.0
+    assert 0.1 < small < 0.3  # noise-sized: mostly smoothed away
+    assert larger / 1.2 > small / 0.4  # bigger (but not mount-change) differences pull proportionally harder
+
+
+def test_moved_mount_needs_confirmation_then_replaces(tmp_path):
+    cal = _cal(tmp_path, _mount(8.0))
+    assert cal.consider_solve(_mount(8.0, yaw_deg=20), {"pos_median_cm": 0.3}, now=1.0) is None
+    assert np.degrees(Rotation.from_matrix(cal.M.rot).magnitude()) < 0.1  # unchanged until confirmed
+    note = cal.consider_solve(_mount(8.1, yaw_deg=20.5), {"pos_median_cm": 0.3}, now=2.0)
+    assert note and "changed" in note
+    assert abs(np.degrees(Rotation.from_matrix(cal.M.rot).magnitude()) - 20.25) < 0.2
+
+
+def test_one_off_outlier_solve_is_ignored(tmp_path):
+    cal = _cal(tmp_path, _mount(8.0))
+    cal.consider_solve(_mount(8.0, yaw_deg=20), {"pos_median_cm": 0.3}, now=1.0)
+    cal.consider_solve(_mount(8.1), {"pos_median_cm": 0.3}, now=2.0)
+    assert np.degrees(Rotation.from_matrix(cal.M.rot).magnitude()) < 0.1
