@@ -17,7 +17,7 @@ import openvr
 
 import queue
 
-from qsft.adjust import Bob, GestureAdjuster
+from qsft.adjust import Bob, Countdown, GestureAdjuster
 from qsft.calibration import Calibrator, Pairer, Pose, _yaw
 from qsft.coords import flip_handedness, matrix34_to_pos_rot, unity_euler_from_matrix, unity_matrix_from_euler
 from qsft.openvr_io import RAW, OpenVRSession, pose_record
@@ -102,6 +102,7 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
     if adjuster.offset is not None:
         log(f"Using the saved in-VR height adjustment: {adjuster.offset:+.3f} m")
     bob = Bob()
+    head_countdown = Countdown()
     gestures: queue.SimpleQueue = queue.SimpleQueue()
     head_pulse_sent = False
 
@@ -118,7 +119,7 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
     log(f"Forwarding {', '.join(f'{s} as tracker {n}' for n, s in enumerate(trackers, 1))}; "
         f"calibrating with {calib_serial}")
     log("Commands: p = pause/resume calibration, m = re-solve mount offset, +/- = height 1 cm, "
-        "h = one VRChat head alignment (test), q = quit")
+        "h [seconds] = VRChat head alignment after a countdown (test), q = quit")
     try:
         while True:
             for line in console.lines():
@@ -135,16 +136,12 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
                     adjuster.start_from(auto_lift)
                     adjuster.nudge(0.01 if cmd == "+" else -0.01)
                     log(f"Tracker height adjustment now {adjuster.offset:+.3f} m (saved)")
-                elif cmd == "h":
-                    pulse, why = head_alignment_pulse(link)
-                    if pulse is None or sender is None:
-                        log(f"Not sending a head alignment: {why or 'no Quest target yet'}")
-                    else:
-                        sender.send(pulse)
-                        head_pulse_sent = True
-                        rec.write("head_pulse", messages=pulse)
-                        log("Sent one VRChat head alignment; height corrections are off for this session "
-                            "so the result shows unaltered. Compare a controller held against a tracker.")
+                elif cmd.split()[0] == "h":
+                    parts = cmd.split()
+                    seconds = float(parts[1]) if len(parts) > 1 and parts[1].replace(".", "", 1).isdigit() else 10.0
+                    head_countdown.start(seconds)
+                    log(f"Head alignment in {seconds:g} s: put the headset on, stand upright and look ahead. "
+                        "Trackers bob at 3-2-1; two bobs = sent, one long bob = refused.")
                 elif line:
                     log(f"Marked: {line}")
                 rec.write("mark", text=line)
@@ -194,6 +191,21 @@ def run(session, rec, cfg, trackers, calib_serial, predict_s, head_lead_ms, args
                     floor_warned = True
                     log(f"Floor alignment would move trackers {floor_lift:+.2f} m; ignoring it "
                         "(check SteamVR's room setup, or set align_floor = false)")
+            countdown = head_countdown.tick()
+            if countdown == "tick":
+                bob.start("tick")
+            elif countdown == "fire":
+                pulse, why = head_alignment_pulse(link)
+                if pulse is None or sender is None:
+                    bob.start("fail")
+                    log(f"Not sending a head alignment: {why or 'no Quest target yet'}")
+                else:
+                    sender.send(pulse)
+                    head_pulse_sent = True
+                    bob.start("ok")
+                    rec.write("head_pulse", messages=pulse)
+                    log("Sent one VRChat head alignment; height corrections are off for this session "
+                        "so the result shows unaltered. Compare a controller held against a tracker.")
             while not gestures.empty():
                 hand, value = gestures.get()
                 event = adjuster.on_gesture(hand, value)

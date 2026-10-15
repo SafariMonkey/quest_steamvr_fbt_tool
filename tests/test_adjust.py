@@ -1,4 +1,4 @@
-from qsft.adjust import FIST, FINGER_POINT, NEUTRAL, THUMBS_UP, Bob, GestureAdjuster
+from qsft.adjust import FIST, FINGER_POINT, NEUTRAL, THUMBS_UP, Bob, Countdown, GestureAdjuster
 
 
 class Clock:
@@ -75,6 +75,21 @@ def test_idle_exit(tmp_path):
     _alternate(adj, clock, "right", 10)
     clock.t += 61
     assert adj.check_idle() == "exit"
+
+
+def test_countdown_ticks_then_fires():
+    clock = Clock()
+    c = Countdown(now=clock)
+    c.start(10)
+    events = []
+    while clock.t < 11:
+        clock.t += 0.05
+        e = c.tick()
+        if e:
+            events.append((round(clock.t, 1), e))
+    assert [e for _, e in events] == ["tick", "tick", "tick", "fire"]
+    assert events[0][0] == 7.0 and events[-1][0] == 10.0
+    assert not c.pending
 
 
 def test_bob():

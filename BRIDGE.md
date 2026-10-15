@@ -24,7 +24,7 @@ Setup is the same as for the probe ([PROBE.md](PROBE.md), one-time setup):
   - `p`: pause or resume calibration.
   - `m`: re-solve the mount offset, e.g. after re-mounting the tracker differently.
   - `+` / `-`: raise or lower the trackers 1 cm.
-  - `h`: one VRChat head alignment (experiment; see Height below).
+  - `h` (or `h 20` for a 20 s countdown): one VRChat head alignment after a 10 s countdown, so you can get into the play space first (experiment; see Height below).
   - `q`: quit.
   - Any other text marks the recording.
 - **Height:** VRChat draws incoming trackers about 21 cm below the coordinates it reports the headset and controllers in. That gap is the same as the height of its reported floor above the real floor. The bridge raises the trackers by that gap, measured from SteamVR's floor, and the status line shows it as `height lift`. If trackers and controllers ever disagree in height, `send-test` wrist mode (PROBE.md) measures the gap directly.
@@ -35,7 +35,7 @@ Setup is the same as for the probe ([PROBE.md](PROBE.md), one-time setup):
     - The result is saved in `vrchat_offset.json` and used from then on, instead of the SteamVR-floor estimate.
     - Known limitation: this relies on the controller's capacitive thumb sensing, which often fails on worn controllers. It's fine on Quest Pro controllers for now, but needs a sturdier trigger long term.
   - **From the PC:** `+` and `-` (then Enter) raise or lower the trackers 1 cm (saved).
-  - **Experiment:** only while wearing the headset, standing upright and looking ahead (the bridge refuses otherwise), `h` sends VRChat one head alignment, taken from the head pose VRChat reports, and turns the height correction off for the session. This replaces any alignment VRChat may have cached. Afterwards, check whether a controller and a tracker held together line up, are still about 21 cm apart, or are now some other distance apart.
+  - **Experiment:** type `h` at the PC, then within 10 s put the headset on, stand upright and look ahead. The trackers bob at 3, 2 and 1 seconds to go; two bobs mean it was sent, one long bob means it was refused (your head wasn't at least 1 m up). It sends VRChat one head alignment, taken from the head pose VRChat reports, and turns the height correction off for the session. This replaces any alignment VRChat may have cached. Afterwards, check whether a controller and a tracker held together line up, are still about 21 cm apart, or are now some other distance apart.
   - To fine-tune by a fixed amount, set `height_offset_m` in `qsft.toml`.
   - To turn the SteamVR-floor estimate off, set `align_floor = false`.
 - **Tuning:**

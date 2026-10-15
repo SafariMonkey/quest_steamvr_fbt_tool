@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from qsft.adjust import Bob, GestureAdjuster
+from qsft.adjust import Bob, Countdown, GestureAdjuster
 from qsft.coords import matrix34_to_pos_rot, unity_euler_from_matrix, yaw_matrix
 from qsft.openvr_io import RAW, STANDING, OpenVRSession, pose_record
 from qsft.osc_io import OscSender
@@ -288,6 +288,7 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
     # which they sit on the controllers.
     adjuster = GestureAdjuster(Path("vrchat_offset.json"))
     bob = Bob()
+    head_countdown = Countdown()
     gestures: queue.SimpleQueue = queue.SimpleQueue()
 
     def on_avatar_param(name: str, value) -> None:
@@ -325,14 +326,10 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
         elif cmd[0] in ("w", "wrist"):
             state["mode"] = "wrist"
         elif cmd[0] == "h":
-            pulse, why = head_alignment_pulse(link)
-            if pulse is None or sender is None:
-                log(f"Not sending a head alignment: {why or 'no Quest target yet'}")
-            else:
-                sender.send(pulse)
-                state["head_pulse"] = True
-                rec.write("head_pulse", messages=pulse)
-                log(f"Sent one head alignment: {pulse}; wrist-mode height offset off from now on")
+            seconds = float(cmd[1]) if len(cmd) > 1 and cmd[1].replace(".", "", 1).isdigit() else 10.0
+            head_countdown.start(seconds)
+            log(f"Head alignment in {seconds:g} s: put the headset on, stand upright and look ahead. "
+                "Trackers bob at 3-2-1; two bobs = sent, one long bob = refused.")
             return True
         elif cmd[0] in ("+", "-"):
             adjuster.nudge(0.01 if cmd[0] == "+" else -0.01)
@@ -359,7 +356,7 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
         return True
 
     log("Commands: f(ollow) | a(nchor) | w(rist) | fixed | x / y / z (spin about that axis) | 0 (no spin) | "
-        "h (one head alignment) | +/- (wrist height 1 cm) | rate N | bundle | q")
+        "h [seconds] (head alignment after a countdown) | +/- (wrist height 1 cm) | rate N | bundle | q")
     if state["mode"] == "anchor":
         take_anchor()
     try:
@@ -374,6 +371,20 @@ def cmd_send_test(args, cfg: dict, rec: Recorder) -> None:
                 log(f"Sending to {target[0]}:{target[1]}" if target else "No Quest target yet (set quest_ip, or wait for mDNS)")
             if state["mode"] == "anchor" and state["anchor"] is None:
                 take_anchor()
+            countdown = head_countdown.tick()
+            if countdown == "tick":
+                bob.start("tick")
+            elif countdown == "fire":
+                pulse, why = head_alignment_pulse(link)
+                if pulse is None or sender is None:
+                    bob.start("fail")
+                    log(f"Not sending a head alignment: {why or 'no Quest target yet'}")
+                else:
+                    sender.send(pulse)
+                    state["head_pulse"] = True
+                    bob.start("ok")
+                    rec.write("head_pulse", messages=pulse)
+                    log(f"Sent one head alignment: {pulse}; wrist-mode height offset off from now on")
             while not gestures.empty():
                 event = adjuster.on_gesture(*gestures.get())
                 if event:

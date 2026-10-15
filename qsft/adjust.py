@@ -109,11 +109,49 @@ class GestureAdjuster:
         return "exit"
 
 
+class Countdown:
+    """A delayed action, so it can be started at the PC and happen once you're in the play space.
+
+    tick() returns "tick" at 3, 2 and 1 seconds to go, "fire" when due, else None.
+    """
+
+    def __init__(self, now=time.monotonic):
+        self._now = now
+        self._due = None
+        self._ticks: list[float] = []
+
+    @property
+    def pending(self) -> bool:
+        return self._due is not None
+
+    def start(self, seconds: float) -> None:
+        self._due = self._now() + seconds
+        self._ticks = [self._due - s for s in (3, 2, 1) if s < seconds]
+
+    def tick(self) -> str | None:
+        if self._due is None:
+            return None
+        now = self._now()
+        if now >= self._due:
+            self._due = None
+            return "fire"
+        if self._ticks and now >= self._ticks[0]:
+            self._ticks.pop(0)
+            return "tick"
+        return None
+
+
 class Bob:
     """Short up/down bobs of the forwarded trackers, as visible feedback in VR."""
 
     HEIGHT_M = 0.05
-    PATTERNS = {"enter": ((0.0, 0.15), (0.3, 0.45)), "exit": ((0.0, 0.4),)}
+    PATTERNS = {
+        "enter": ((0.0, 0.15), (0.3, 0.45)),
+        "exit": ((0.0, 0.4),),
+        "tick": ((0.0, 0.1),),
+        "ok": ((0.0, 0.15), (0.3, 0.45)),
+        "fail": ((0.0, 0.8),),
+    }
 
     def __init__(self, now=time.monotonic):
         self._now = now
