@@ -11,7 +11,7 @@ Every command records what it sees to `recordings/` so the data can be analysed 
 1. **Install uv**, which also installs the right Python version:
    `winget install --id=astral-sh.uv -e`
 2. **Get the code and its dependencies:**
-   `git clone <fork URL>`, then `cd quest_steamvr_fbt_tool`, then `uv sync`.
+   `git clone -b probe <fork URL>`, then `cd quest_steamvr_fbt_tool`, then `uv sync`.
    To update later: `git pull`, then `uv sync`.
 3. **Check the network** (on this PC):
    - The network profile must be **Private**: Settings → Network & Internet → (your connection) → Properties. Windows blocks mDNS discovery on Public networks.
@@ -21,6 +21,7 @@ Every command records what it sees to `recordings/` so the data can be analysed 
    1. Start SteamVR with every tracker on.
    2. Run `uv run python -m qsft.probe devices` and note Person B's tracker serials.
    3. Copy `qsft.example.toml` to `qsft.toml` and fill those serials in.
+   4. Also set `quest_ip` (on the Quest: Settings → Wi-Fi → your network's details). This makes the probe advertise on the network adapter that actually reaches the Quest, which matters if this PC has a VPN adapter (Tailscale, ZeroTier, etc.).
 5. **Quest VRChat settings:**
    - Turn OSC on: Action Menu → Options → OSC → Enabled.
    - Turn on **Allow Sending Head and Wrist VR Tracking OSC Data** (Settings → Tracking & IK) and accept its notice.

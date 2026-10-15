@@ -1,5 +1,11 @@
 # Quest SteamVR FBT Tool
 
+> **This fork** is reworking the tool to forward a second player's Lighthouse trackers, from a PC shared with a PCVR player, to standalone Quest VRChat, calibrated to the Quest's tracking space.
+> - Design and research: [INVESTIGATION.md](INVESTIGATION.md).
+> - Hardware tests (current stage): [PROBE.md](PROBE.md).
+>
+> The original tool and its Japanese README follow. The original script sends rotations incorrectly; see INVESTIGATION.md §1.
+
 SteamVRに認識されているトラッカーをOSC経由でVRChatで使えるようにするソフトです。  
 Questと名がついていますが別にPCでも使えます。（Oculus PC版VRChatなど）  
 VIVE Trackerで動作を確認していますが、他のトラッカーでも動くかもしれません。  
