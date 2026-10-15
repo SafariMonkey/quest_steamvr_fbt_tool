@@ -144,6 +144,18 @@ def solve_full(H: list[Pose], T: list[Pose]) -> tuple[Pose, Pose, dict]:
     return Pose(px, rx), Pose(mx, rm), quality
 
 
+def fit_with_mount(H: list[Pose], T: list[Pose], M: Pose) -> dict:
+    """Fit quality of a fixed mount offset on samples: best yaw-only X for it, then median errors."""
+    xs = [h @ M.inv() @ t.inv() for h, t in zip(H, T)]
+    yaws = np.array([_yaw(yaw_only(x.rot)) for x in xs])
+    yaw = np.angle(np.mean(np.exp(1j * yaws)))
+    X = Pose(np.median([x.pos for x in xs], axis=0), Rotation.from_rotvec([0, yaw, 0]).as_matrix())
+    pred = [X @ t @ M for t in T]
+    perr = [np.linalg.norm(p.pos - h.pos) * 100 for p, h in zip(pred, H)]
+    aerr = [np.degrees(Rotation.from_matrix(p.rot.T @ h.rot).magnitude()) for p, h in zip(pred, H)]
+    return {"pos_median_cm": float(np.median(perr)), "angle_median_deg": float(np.median(aerr))}
+
+
 class Calibrator:
     """Pairs head samples with the mounted tracker, solves M once, then tracks X.
 
@@ -161,6 +173,14 @@ class Calibrator:
     DIVERSITY_DEG = 2.0  # keep a sample only if its orientation differs this much from all kept ones
     MAX_GOOD_POS_CM = 2.0
     MAX_GOOD_ANGLE_DEG = 3.0
+    # Refining M later: keep re-solving from fresh samples; M is the fit-weighted mean of all good solves,
+    # so a mediocre first solve is soon outvoted and solve-to-solve noise (~±0.7 cm) averages out.
+    REFINE_EVERY = 50
+    REFINE_MIN_SAMPLES = 150
+    REFINE_MAX_POS_CM = 0.6
+    REFINE_MAX_ANGLE_DEG = 1.0
+    MAX_SOLVES = 50
+    SAMPLE_MAX_AGE_S = 60.0  # mount samples older than this are dropped (slow drift would mix spaces)
     # Continuous X
     MAX_ANGULAR_SPEED = 1.5  # rad/s; faster samples are too timing-sensitive
     WINDOW = 50  # samples (~1 s)
@@ -189,10 +209,12 @@ class Calibrator:
         self._speeds: deque = deque(maxlen=self.ATTACH_WINDOW)
         self._H: deque = deque(maxlen=self.MOUNT_MAX_SAMPLES)
         self._T: deque = deque(maxlen=self.MOUNT_MAX_SAMPLES)
+        self._ts: deque = deque(maxlen=self.MOUNT_MAX_SAMPLES)
         self._new_since_solve = 0
         self._window: deque = deque(maxlen=self.WINDOW)
         self._prev: tuple[int, Pose, Pose] | None = None
         self._candidate: Pose | None = None
+        self._solves: list[tuple[Pose, float]] = []  # (M, weight)
         self.load()
 
     def load(self) -> None:
@@ -201,17 +223,32 @@ class Calibrator:
             self.M = Pose.from_json(d["M"]) if d.get("M") else None
             self.X = Pose.from_json(d["X"]) if d.get("X") else None
             self.quality = d.get("quality", {})
+            self._solves = [(Pose.from_json(m), m["weight"]) for m in d.get("mount_solves", [])]
 
     def save(self) -> None:
         self.path.write_text(json.dumps({
             "M": self.M.to_json() if self.M else None,
             "X": self.X.to_json() if self.X else None,
             "quality": self.quality,
+            "mount_solves": [{**m.to_json(), "weight": w} for m, w in self._solves],
         }, indent=1))
 
     def reset_mount(self) -> None:
         self.M = None
-        self._H.clear(); self._T.clear()
+        self._solves.clear()
+        self._clear_samples()
+
+    def _add_solve(self, M: Pose, q: dict) -> None:
+        """Fold a good solve into M (fit-weighted mean of the recent solves)."""
+        self._solves = [*self._solves, (M, 1.0 / (q["pos_median_cm"] ** 2 + 0.05))][-self.MAX_SOLVES:]
+        w = np.array([wt for _, wt in self._solves])
+        pos = np.sum([m.pos * wt for m, wt in self._solves], axis=0) / w.sum()
+        rot = Rotation.from_matrix(np.array([m.rot for m, _ in self._solves])).mean(weights=w).as_matrix()
+        self.M = Pose(pos, rot)
+
+    def _clear_samples(self) -> None:
+        self._H.clear(); self._T.clear(); self._ts.clear()
+        self._new_since_solve = 0
 
     @property
     def state(self) -> str:
@@ -230,9 +267,12 @@ class Calibrator:
         if not self.paused and self.attached:
             if self.M is None:
                 if max(w_head, w_tracker) <= self.MOUNT_MAX_ANGULAR_SPEED:
-                    notes.append(self._collect(head, tracker))
-            elif max(w_head, w_tracker) <= self.MAX_ANGULAR_SPEED:
-                notes.append(self._track(head, tracker))
+                    notes.append(self._collect(t, head, tracker))
+            else:
+                if max(w_head, w_tracker) <= self.MOUNT_MAX_ANGULAR_SPEED:
+                    notes.append(self._refine(t, head, tracker))
+                if max(w_head, w_tracker) <= self.MAX_ANGULAR_SPEED:
+                    notes.append(self._track(head, tracker))
         notes = [n for n in notes if n]
         return "; ".join(notes) if notes else None
 
@@ -248,7 +288,7 @@ class Calibrator:
         if abs(dang_h - dang_t) < self.JUMP_DEG and abs(dpos_h - dpos_t) < self.JUMP_CM:
             return None
         # The Quest's tracking origin moved: samples from before are in the old space.
-        self._H.clear(); self._T.clear()
+        self._clear_samples()
         self._window.clear()
         return f"Quest tracking jumped ({dpos_h - dpos_t:+.0f} cm, {dang_h - dang_t:+.0f} deg vs the tracker)"
 
@@ -266,6 +306,7 @@ class Calibrator:
             return None
         self.attached = attached
         self._window.clear()
+        self._clear_samples()
         if attached:
             return "calibration tracker is moving with the headset"
         return "calibration tracker isn't moving with the headset; calibration frozen"
@@ -291,6 +332,7 @@ class Calibrator:
                 return None
             self.X = est
             self._candidate = None
+            self._clear_samples()  # samples from before are in the old space
             self.save()
             return f"Quest tracking space moved {dpos:.0f} cm / {dang:.0f} deg; re-aligned"
         self._candidate = None
@@ -314,14 +356,49 @@ class Calibrator:
         yaw = med_yaw + np.angle(np.mean(np.exp(1j * (yaws[keep] - med_yaw))))
         return Pose(pos[keep].mean(axis=0), Rotation.from_rotvec([0, yaw, 0]).as_matrix())
 
-    def _collect(self, head: Pose, tracker: Pose) -> str | None:
+    def _add_diverse(self, t: int, head: Pose, tracker: Pose) -> bool:
+        """Keep the sample if its orientation differs enough from every kept one."""
+        while self._ts and self._ts[0] < t - self.SAMPLE_MAX_AGE_S * 1e9:
+            self._H.popleft(); self._T.popleft(); self._ts.popleft()
         if self._T:
             # cos(angle between rotations) = (trace(A^T B) - 1) / 2, for all kept samples at once
             traces = np.einsum("nij,ij->n", np.array([t.rot for t in self._T]), tracker.rot)
             if np.max(traces) > 1 + 2 * np.cos(np.radians(self.DIVERSITY_DEG)):
-                return None
-        self._H.append(head); self._T.append(tracker)
+                return False
+        self._H.append(head); self._T.append(tracker); self._ts.append(t)
         self._new_since_solve += 1
+        return True
+
+    def _refine(self, t: int, head: Pose, tracker: Pose) -> str | None:
+        """Re-solve M from recent varied samples; adopt it only if it clearly beats the current M on them."""
+        if not self._add_diverse(t, head, tracker):
+            return None
+        if len(self._H) < self.REFINE_MIN_SAMPLES or self._new_since_solve < self.REFINE_EVERY:
+            return None
+        self._new_since_solve = 0
+        H, T = list(self._H), list(self._T)
+        self._clear_samples()  # next solve uses fresh samples
+        try:
+            _, M, q = solve_full(H, T)
+        except ValueError:
+            return None
+        if q["pos_median_cm"] > self.REFINE_MAX_POS_CM or q["angle_median_deg"] > self.REFINE_MAX_ANGLE_DEG:
+            return None
+        before = self.M
+        self._add_solve(M, q)
+        self.quality = q
+        self.save()
+        dpos, dang = _pose_distance(self.M, before)
+        if dpos < 0.3 and dang < 0.3:
+            return None
+        cur = fit_with_mount(H, T, self.M)
+        return (f"mount offset refined ({len(self._solves)} solves): moved {dpos:.1f} cm / {dang:.1f} deg, "
+                f"lever arm {np.linalg.norm(self.M.pos) * 100:.1f} cm; fit on latest samples "
+                f"{cur['pos_median_cm']:.2f} cm / {cur['angle_median_deg']:.2f} deg")
+
+    def _collect(self, t: int, head: Pose, tracker: Pose) -> str | None:
+        if not self._add_diverse(t, head, tracker):
+            return None
         if len(self._H) < self.MOUNT_MIN_SAMPLES or self._new_since_solve < self.MOUNT_SOLVE_EVERY:
             return None
         self._new_since_solve = 0
@@ -331,10 +408,12 @@ class Calibrator:
             return None
         if q["pos_median_cm"] > self.MAX_GOOD_POS_CM or q["angle_median_deg"] > self.MAX_GOOD_ANGLE_DEG:
             for _ in range(len(self._H) // 2):  # probably mixed spaces; drop the older half
-                self._H.popleft(); self._T.popleft()
+                self._H.popleft(); self._T.popleft(); self._ts.popleft()
             return f"mount solve rejected ({q['pos_median_cm']:.1f} cm, {q['angle_median_deg']:.1f} deg); collecting more"
-        self.M, self.X, self.quality = M, X, q
-        self._H.clear(); self._T.clear()
+        self._solves.clear()
+        self._add_solve(M, q)
+        self.X, self.quality = X, q
+        self._clear_samples()
         self.save()
         return (f"mount offset solved: lever arm {q['lever_arm_cm']:.1f} cm, fit {q['pos_median_cm']:.2f} cm / "
                 f"{q['angle_median_deg']:.2f} deg over {q['samples']} samples")
