@@ -1,5 +1,5 @@
 # Copy to qsft.toml (not committed) and fill in. Command-line options override these.
-# Serial numbers come from: uv run python -m qsft.probe devices
+# Find serial numbers with: uv run python -m qsft.probe identify (shake a tracker to see its serial)
 
 [probe]
 # Person B's body trackers (forwarded to the Quest).

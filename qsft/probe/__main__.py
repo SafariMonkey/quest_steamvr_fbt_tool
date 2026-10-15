@@ -24,6 +24,7 @@ def main(argv: list[str] | None = None) -> None:
                        help="OSCQuery tree style: typed endpoints like VRChat's sample, or a bare node like SlimeVR")
 
     sub.add_parser("devices", help="H1: list SteamVR devices, serials and tracking universes")
+    sub.add_parser("identify", help="setup: shake a tracker (or turn it on/off) to see which serial it is")
 
     p = sub.add_parser("pc-watch", help="H1: show whether still trackers move in raw vs standing space")
     p.add_argument("--serial", action="append", help="tracker serial to watch (repeatable; default: config, else all trackers)")

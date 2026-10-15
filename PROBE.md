@@ -18,10 +18,12 @@ Every command records what it sees to `recordings/` so the data can be analysed 
    - The first time the probe runs, Windows Firewall may ask about Python. Allow it on **private networks**.
    - The Quest and this PC must be on the same LAN subnet. Wi-Fi "AP isolation" or "client isolation" on the router must be off.
 4. **Fill in the config:**
-   1. Start SteamVR with every tracker on.
-   2. Run `uv run python -m qsft.probe devices` and note Person B's tracker serials.
-   3. Copy `qsft.example.toml` to `qsft.toml` and fill those serials in.
-   4. Also set `quest_ip` (on the Quest: Settings → Wi-Fi → your network's details). This makes the probe advertise on the network adapter that actually reaches the Quest, which matters if this PC has a VPN adapter (Tailscale, ZeroTier, etc.).
+   1. Start SteamVR.
+   2. Run `uv run python -m qsft.probe identify`.
+   3. Shake or twist each of Person B's trackers in turn. Each one prints `Moving: LHR-…`. Turning a tracker on or off prints its serial too. Note the serials, including the one you'll mount on the Quest Pro.
+   4. Copy `qsft.example.toml` to `qsft.toml` and fill the serials in. The tracker for the Quest Pro is `calibration_tracker`.
+   5. Run `identify` again: each tracker now prints its role from the config, so you can check them.
+   6. Also set `quest_ip` (on the Quest: Settings → Wi-Fi → your network's details). This makes the probe advertise on the network adapter that actually reaches the Quest, which matters if this PC has a VPN adapter (Tailscale, ZeroTier, etc.).
 5. **Quest VRChat settings:**
    - Turn OSC on: Action Menu → Options → OSC → Enabled.
    - Turn on **Allow Sending Head and Wrist VR Tracking OSC Data** (Settings → Tracking & IK) and accept its notice.
