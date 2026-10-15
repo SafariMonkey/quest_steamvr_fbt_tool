@@ -6,6 +6,7 @@ import threading
 import time
 import tomllib
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -14,6 +15,7 @@ import numpy as np
 from qsft.coords import unity_matrix_from_euler
 from qsft.osc_io import OscReceiver, ReceivedMessage
 from qsft.oscquery import (
+    OSC_SERVICE,
     VRSYSTEM_POSE_ADDRESSES,
     OscQueryAdvertiser,
     ServiceRecord,
@@ -129,8 +131,14 @@ class QuestLink:
     JUMP_ANGULAR_DEG_S = 720.0
     JUMP_MIN_DEG = 20.0
 
-    def __init__(self, recorder: Recorder, cfg: dict, tree: str = "typed", name: str = "QSFT-Probe"):
+    def __init__(
+        self, recorder: Recorder, cfg: dict, tree: str = "typed", name: str = "QSFT-Probe",
+        on_head: Callable[[ReceivedMessage], None] | None = None,
+    ):
         self._rec = recorder
+        self._on_head_cb = on_head
+        self._started = time.monotonic()
+        self._queried_by: set[str] = set()
         self.quest_ip: str | None = cfg.get("quest_ip") or None
         self.local_ips = {ip for _, ip in local_ipv4_addresses()} | {"127.0.0.1"}
         self.lan_ip = cfg.get("lan_ip") or route_ip(self.quest_ip) or "127.0.0.1"
@@ -147,6 +155,7 @@ class QuestLink:
         self._receiver.start()
         self._advertiser = OscQueryAdvertiser(name, self.lan_ip, self._receiver.port, tree, self._on_http)
         self._advertiser.start()
+        name = self._advertiser.name
         log(
             f"Advertising '{name}' on {self.lan_ip}: OSC udp/{self._receiver.port}, "
             f"OSCQuery http/{self._advertiser.http_port} (tree: {tree})"
@@ -166,17 +175,33 @@ class QuestLink:
         return ip in self.local_ips
 
     def quest_target(self) -> tuple[str, int] | None:
-        """The Quest's VRChat OSC input: configured IP, else a VRChat client found on another machine."""
-        clients = [s for s in self.watcher.vrchat_osc_targets() if s.addresses and s.port]
-        if self.quest_ip:
-            for s in clients:
-                if self.quest_ip in s.addresses:
-                    return self.quest_ip, s.port
-            return self.quest_ip, 9000  # VRChat's default OSC input port
-        found = [s for s in clients if not self.is_local(s.addresses[0])]
-        if found:
-            return found[0].addresses[0], found[0].port
-        return None
+        """The Quest's VRChat OSC input.
+
+        IP: configured, else a VRChat client on another machine (mDNS), else wherever head poses come from.
+        Port: from its _osc._udp record or HOST_INFO (the Quest only advertised _oscjson), else 9000.
+        HOST_INFO's OSC_IP is the Quest's own 127.0.0.1, so it's never used.
+        """
+        clients = [s for s in self.watcher.vrchat_clients() if s.addresses]
+        ip = self.quest_ip
+        if ip is None:
+            remote = [s for s in clients if not self.is_local(s.addresses[0])]
+            if remote:
+                ip = remote[0].addresses[0]
+            else:
+                with self._lock:
+                    ip = next((h for h in self.heads if not self.is_local(h)), None)
+        if ip is None:
+            return None
+        for s in clients:
+            if ip in s.addresses:
+                if s.type == OSC_SERVICE and s.port:
+                    return ip, s.port
+                if s.host_info and isinstance(s.host_info.get("OSC_PORT"), int):
+                    return ip, s.host_info["OSC_PORT"]
+        return ip, 9000  # VRChat's default OSC input port
+
+    def is_quest(self, ip: str) -> bool:
+        return ip == self.quest_ip if self.quest_ip else not self.is_local(ip)
 
     def head(self) -> HeadPose | None:
         """Latest head pose from the Quest (configured IP, else any non-local sender)."""
@@ -198,11 +223,17 @@ class QuestLink:
             where = "LOCAL (this PC)" if self.is_local(ip) else ip
             values = ", ".join(f"{v:.3f}" if isinstance(v, float) else repr(v) for v in st.last_args)
             lines.append(f"  {where} {address}: {rate:5.1f} Hz, max gap {gap:6.0f} ms, n={st.count}  [{values}]")
-        vrc = self.watcher.vrchat_osc_targets()
+        vrc = self.watcher.vrchat_clients()
         lines.append(
             "  VRChat clients: "
-            + (", ".join(f"{s.name.split('.')[0]}@{s.addresses[0] if s.addresses else '?'}:{s.port}" for s in vrc) or "none seen")
+            + (", ".join(sorted({f"{s.name.split('.')[0]}@{s.addresses[0] if s.addresses else '?'}" for s in vrc})) or "none seen")
         )
+        unasked = {s.addresses[0] for s in vrc if s.addresses and not self.is_local(s.addresses[0])} - self._queried_by
+        if unasked and time.monotonic() - self._started > 10:
+            lines.append(
+                f"  HINT: VRChat at {', '.join(sorted(unasked))} hasn't queried us. In VRChat, turn "
+                "'Allow Sending Head and Wrist VR Tracking OSC Data' off and on again (or restart VRChat)."
+            )
         return lines
 
     def _on_message(self, msg: ReceivedMessage) -> None:
@@ -219,6 +250,8 @@ class QuestLink:
             st.add(msg)
         if msg.address == HEAD_ADDRESS and len(msg.args) == 6:
             self._on_head(msg)
+            if self._on_head_cb and self.is_quest(ip):
+                self._on_head_cb(msg)
 
     def _on_head(self, msg: ReceivedMessage) -> None:
         ip = msg.src[0]
@@ -245,6 +278,7 @@ class QuestLink:
         self._rec.write("osc_error", src=f"{src[0]}:{src[1]}", error=repr(error))
 
     def _on_http(self, client_ip: str, path: str) -> None:
+        self._queried_by.add(client_ip)
         self._rec.write("http", client=client_ip, path=path)
         key = (client_ip, path)
         self._http_seen[key] = self._http_seen.get(key, 0) + 1

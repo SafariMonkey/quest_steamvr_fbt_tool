@@ -2,7 +2,8 @@
 
 > **This fork** is reworking the tool to forward a second player's Lighthouse trackers, from a PC shared with a PCVR player, to standalone Quest VRChat, calibrated to the Quest's tracking space.
 > - Design and research: [INVESTIGATION.md](INVESTIGATION.md).
-> - Hardware tests (current stage): [PROBE.md](PROBE.md).
+> - Hardware tests: [PROBE.md](PROBE.md).
+> - Trying it for real (experimental): [BRIDGE.md](BRIDGE.md).
 >
 > The original tool and its Japanese README follow. The original script sends rotations incorrectly; see INVESTIGATION.md §1.
 

@@ -82,9 +82,9 @@ class OpenVRSession:
             )
         return out
 
-    def poses(self, universe=RAW):
-        """All device poses (indexed by device index), sampled now. The array is reused between calls."""
-        self.system.getDeviceToAbsoluteTrackingPose(universe, 0.0, self._poses)
+    def poses(self, universe=RAW, predict_s: float = 0.0):
+        """All device poses (indexed by device index), now or extrapolated ahead. The array is reused between calls."""
+        self.system.getDeviceToAbsoluteTrackingPose(universe, predict_s, self._poses)
         return self._poses
 
     def raw_to_standing(self) -> np.ndarray:

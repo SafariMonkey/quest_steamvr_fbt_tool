@@ -164,3 +164,4 @@ qsft_config.ini
 # qsft
 qsft.toml
 recordings/
+calibration.json

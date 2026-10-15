@@ -89,7 +89,9 @@ class OscQueryAdvertiser:
         http = OSCQueryHTTPServer(space, None, ("", 0), _RecordingHandler)
         http.on_request = on_request
         self.http_port = http.server_address[1]
-        self._service = OSCQueryService(space, name, self.http_port, osc_port, lan_ip)
+        # A fresh name per run (as SlimeVR does): VRChat ignored a re-advertised name with new ports.
+        self.name = f"{name}-{self.http_port}"
+        self._service = OSCQueryService(space, self.name, self.http_port, osc_port, lan_ip)
         http.host_info = self._service.host_info
         # Pre-create the HTTP server so start() only registers mDNS; this gives us the
         # request hook and an OS-assigned port that is known before advertising.
@@ -109,6 +111,7 @@ class ServiceRecord:
     name: str
     addresses: list[str] = field(default_factory=list)
     port: int | None = None
+    host_info: dict | None = None
 
     @property
     def is_vrchat(self) -> bool:
@@ -130,6 +133,10 @@ class ServiceWatcher:
         with self._lock:
             return [s for s in self.services.values() if s.is_vrchat and s.type == OSC_SERVICE]
 
+    def vrchat_clients(self) -> list[ServiceRecord]:
+        with self._lock:
+            return [s for s in self.services.values() if s.is_vrchat]
+
     def close(self) -> None:
         self._browser.cancel()
         self._resolver.shutdown(wait=False, cancel_futures=True)
@@ -150,12 +157,11 @@ class ServiceWatcher:
         if info is not None:
             record.addresses = info.parsed_addresses()
             record.port = info.port
+        if record.is_vrchat and service_type == OSCJSON_SERVICE and record.addresses and record.port:
+            record.host_info = _fetch_host_info(record.addresses[0], record.port)
         with self._lock:
             self.services[(service_type, name)] = record
-        host_info = None
-        if record.is_vrchat and service_type == OSCJSON_SERVICE and record.addresses and record.port:
-            host_info = _fetch_host_info(record.addresses[0], record.port)
-        self._on_event(event, record, host_info)
+        self._on_event(event, record, record.host_info)
 
 
 def _fetch_host_info(ip: str, port: int) -> dict:
