@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from qsft.openvr_io import RAW, OpenVRSession
+from qsft.openvr_io import RAW, OpenVRSession, SteamVRNotRunning
 from qsft.util import ConsoleInput, Every, Ticker, load_config, log
 
 ANGULAR_RAD_S = 3.0  # a deliberate shake or twist; resting or worn trackers stay well below
@@ -35,7 +35,10 @@ def main(argv: list[str] | None = None) -> None:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", type=Path, default=Path("qsft.toml"))
     cfg = load_config(parser.parse_args(argv).config)
-    session = OpenVRSession()
+    try:
+        session = OpenVRSession()
+    except SteamVRNotRunning:
+        raise SystemExit("SteamVR isn't running. Start SteamVR first.") from None
     console = ConsoleInput()
     ticker, window, refresh = Ticker(60.0), Every(WINDOW_S), Every(2.0)
     trackers: dict[str, int] = {}

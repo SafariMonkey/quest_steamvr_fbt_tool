@@ -40,14 +40,17 @@ Do this once, on the PC the trackers are connected to.
 
 ## Use
 
-1. Start SteamVR, with the calibration tracker on the headset, and start VRChat on the Quest.
-2. Run `uv run python -m qsft.bridge`.
+1. Run `uv run python -m qsft.bridge`.
+2. Start SteamVR, with the calibration tracker on the headset, and start VRChat on the Quest.
+   - Any order works. The bridge waits for whatever isn't running yet, and recovers if SteamVR or VRChat restarts.
+   - Its status line says what it's still waiting for.
 3. **First time only:** move your head around (turn, nod, tilt) until it prints `mount offset solved`. This takes about 10–20 s.
 4. Once the status shows `sending to …`, run VRChat's full-body calibration.
 
 **While playing:**
 - **Calibration tracker on the headset:** the alignment survives the Quest re-localising.
 - **To take it off:** type `p` then Enter to pause, or switch the tracker off. The last alignment is kept until the Quest re-localises.
+- **Saved alignment:** an alignment saved from the last run is used as a starting point. It's often stale, because the Quest re-localises after sleeping, so it's replaced as soon as the calibration tracker is on the headset again. The mounting offset is kept.
 - **Console commands:**
   - `p`: pause or resume calibration.
   - `m`: re-solve the mounting offset, e.g. after re-mounting the tracker differently.

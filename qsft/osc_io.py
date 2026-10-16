@@ -95,22 +95,29 @@ class OscSender:
     def __init__(self, ip: str, port: int):
         self.target = (ip, port)
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.last_error: OSError | None = None
 
-    def send(self, messages: list[tuple[str, list[float]]], bundle: bool = True) -> None:
+    def send(self, messages: list[tuple[str, list[float]]], bundle: bool = True) -> bool:
+        """Send; returns False (and keeps last_error) if the OS refused, e.g. nothing listening yet."""
         built = []
         for address, args in messages:
             b = OscMessageBuilder(address=address)
             for a in args:
                 b.add_arg(float(a))  # python-osc rejects numpy floats; VRChat expects 32-bit floats
             built.append(b.build())
-        if bundle:
-            bb = OscBundleBuilder(IMMEDIATELY)
-            for m in built:
-                bb.add_content(m)
-            self._sock.sendto(bb.build().dgram, self.target)
-        else:
-            for m in built:
-                self._sock.sendto(m.dgram, self.target)
+        try:
+            if bundle:
+                bb = OscBundleBuilder(IMMEDIATELY)
+                for m in built:
+                    bb.add_content(m)
+                self._sock.sendto(bb.build().dgram, self.target)
+            else:
+                for m in built:
+                    self._sock.sendto(m.dgram, self.target)
+        except OSError as e:  # e.g. Windows reporting an earlier ICMP port-unreachable, or no route yet
+            self.last_error = e
+            return False
+        return True
 
     def close(self) -> None:
         self._sock.close()

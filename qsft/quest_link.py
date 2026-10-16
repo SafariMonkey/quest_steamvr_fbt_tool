@@ -50,8 +50,8 @@ class QuestLink:
     def __init__(self, cfg: dict, on_head: Callable[[ReceivedMessage], None], recorder=None, name: str = "QSFT"):
         self._rec = recorder or NullRecorder()
         self._on_head = on_head
-        self._started = time.monotonic()
-        self._queried_by: set[str] = set()
+        self._queried_at: dict[str, float] = {}  # VRChat IP -> last OSCQuery request or head pose from it
+        self._vrchat_seen_at: dict[str, float] = {}  # VRChat IP -> when its service (re)appeared
         self.quest_ip: str | None = cfg.get("quest_ip") or None
         self.local_ips = {ip for _, ip in local_ipv4_addresses()} | {"127.0.0.1"}
         self.lan_ip = cfg.get("lan_ip") or route_ip(self.quest_ip) or "127.0.0.1"
@@ -120,8 +120,10 @@ class QuestLink:
             "  VRChat clients: "
             + (", ".join(sorted({f"{s.name.split('.')[0]}@{s.addresses[0] if s.addresses else '?'}" for s in vrc})) or "none seen")
         )
-        unasked = {s.addresses[0] for s in vrc if s.addresses and not self.is_local(s.addresses[0])} - self._queried_by
-        if unasked and time.monotonic() - self._started > 10:
+        now_s = time.monotonic()
+        unasked = {ip for ip, seen in self._vrchat_seen_at.items()
+                   if not self.is_local(ip) and self._queried_at.get(ip, -1.0) < seen and now_s - seen > 10}
+        if unasked:
             lines.append(
                 f"  HINT: VRChat at {', '.join(sorted(unasked))} hasn't queried us. In VRChat, turn "
                 "'Allow Sending Head and Wrist VR Tracking OSC Data' off and on again (or restart VRChat)."
@@ -136,6 +138,7 @@ class QuestLink:
         )
         if msg.address != HEAD_ADDRESS or len(msg.args) != 6:
             return
+        self._queried_at[ip] = time.monotonic()  # receiving its head pose proves VRChat found us
         with self._lock:
             st = self._head_stats.get(ip)
             if st is None:
@@ -149,9 +152,9 @@ class QuestLink:
         self._rec.write("osc_error", src=f"{src[0]}:{src[1]}", error=repr(error))
 
     def _on_http(self, client_ip: str, path: str) -> None:
-        if client_ip not in self._queried_by:
+        if self._queried_at.get(client_ip, -1.0) < self._vrchat_seen_at.get(client_ip, 0.0) or client_ip not in self._queried_at:
             log(f"VRChat at {client_ip} found us{' (LOCAL - this PC)' if self.is_local(client_ip) else ''}")
-        self._queried_by.add(client_ip)
+        self._queried_at[client_ip] = time.monotonic()
         self._rec.write("http", client=client_ip, path=path)
 
     def _on_service(self, event: str, record: ServiceRecord, host_info: dict | None) -> None:
@@ -161,3 +164,5 @@ class QuestLink:
         )
         if record.is_vrchat and event == "added":
             log(f"Found {record.name.split('.')[0]} at {record.addresses[0] if record.addresses else '?'}")
+            if record.addresses:
+                self._vrchat_seen_at[record.addresses[0]] = time.monotonic()

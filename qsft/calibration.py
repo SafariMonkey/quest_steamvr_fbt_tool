@@ -33,12 +33,14 @@ class VRChatClock:
     """
 
     WINDOW = 3000  # samples (~1 min at 50 Hz)
+    RESET_AFTER_GAP_NS = 2_000_000_000  # e.g. VRChat restarted: don't trust the old offsets
 
     def __init__(self):
         self._last_s = None
         self._last_f = 0.0
         self._wrapped = False
         self._offsets: deque = deque(maxlen=self.WINDOW)
+        self._last_arrival: int | None = None
 
     def decode(self, time_tag: float) -> float:
         s = np.floor(time_tag)
@@ -53,6 +55,10 @@ class VRChatClock:
     def local_time(self, time_tag: float | None, arrival_ns: int) -> int:
         if not time_tag:
             return arrival_ns
+        if self._last_arrival is not None and arrival_ns - self._last_arrival > self.RESET_AFTER_GAP_NS:
+            self._offsets.clear()
+            self._last_s = None
+        self._last_arrival = arrival_ns
         send_ns = int(self.decode(time_tag) * 1e9)
         self._offsets.append(arrival_ns - send_ns)
         return send_ns + min(self._offsets)
@@ -212,6 +218,7 @@ class Calibrator:
         self._prev: tuple[int, Pose, Pose] | None = None
         self._candidate: Pose | None = None
         self._solves: list[tuple[Pose, float, float]] = []  # (M, fit weight, wall time)
+        self.x_from_last_run = False
         self._pending_change: Pose | None = None
         self._wall_offset = time.time() - time.perf_counter_ns() / 1e9  # sample times are perf_counter ns
         self.load()
@@ -221,6 +228,7 @@ class Calibrator:
             d = json.loads(self.path.read_text())
             self.M = Pose.from_json(d["M"]) if d.get("M") else None
             self.X = Pose.from_json(d["X"]) if d.get("X") else None
+            self.x_from_last_run = self.X is not None  # likely stale if the Quest has slept since
             self.quality = d.get("quality", {})
             self._solves = [(Pose.from_json(m), m["weight"], m.get("time", 0.0)) for m in d.get("mount_solves", [])]
 
@@ -345,6 +353,9 @@ class Calibrator:
         est = self._window_estimate()
         if est is None:
             return None
+        if self.x_from_last_run:
+            # The saved alignment is likely stale (the Quest re-localises after sleep); take this session's.
+            self.X, self.x_from_last_run = None, False
         if self.X is None:
             self.X = est
             self.save()
@@ -432,6 +443,7 @@ class Calibrator:
         self._solves.clear()
         self._add_solve(M, q, self._wall_offset + t / 1e9)
         self.X, self.quality = X, q
+        self.x_from_last_run = False
         self._clear_samples()
         self.save()
         return (f"mount offset solved: lever arm {q['lever_arm_cm']:.1f} cm, fit {q['pos_median_cm']:.2f} cm / "
@@ -495,11 +507,15 @@ class Pairer:
         self._lock = threading.Lock()
         self._prev_head: tuple[int, Pose] | None = None
 
+    MAX_PENDING_S = 3.0  # older head samples can't be paired any more (e.g. calibration tracker off)
+
     def add_head(self, arrival_ns: int, bundle_time: float | None, head: Pose) -> None:
         """Called for every head sample, in arrival order (any thread)."""
         t = self.clock.local_time(bundle_time, arrival_ns)
         with self._lock:
             self._pending.append((t, arrival_ns - t, head))
+            while self._pending[0][0] < t - self.MAX_PENDING_S * 1e9:
+                self._pending.popleft()
 
     def ready(self):
         """Yield (time, head, tracker, head angular speed, tracker angular speed) once the tracker pose is known."""

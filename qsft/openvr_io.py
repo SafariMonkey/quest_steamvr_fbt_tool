@@ -29,6 +29,10 @@ _DEVICE_EVENTS = {
 }
 
 
+class SteamVRNotRunning(Exception):
+    pass
+
+
 @dataclass
 class DeviceInfo:
     index: int
@@ -51,7 +55,7 @@ class OpenVRSession:
         try:
             openvr.init(openvr.VRApplication_Background)
         except openvr.error_code.InitError_Init_NoServerForBackgroundApp:
-            raise SystemExit("SteamVR isn't running. Start SteamVR first.") from None
+            raise SteamVRNotRunning() from None
         self.system = openvr.VRSystem()
         self._poses = (openvr.TrackedDevicePose_t * openvr.k_unMaxTrackedDeviceCount)()
         self._event = openvr.VREvent_t()
