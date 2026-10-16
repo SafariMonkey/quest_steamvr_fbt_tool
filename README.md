@@ -34,7 +34,7 @@ Do this once, on the PC the trackers are connected to.
 - Turn on OSC: Action Menu → Options → OSC.
 - In **Tracking & IK**:
   - Turn on **Allow Sending Head and Wrist VR Tracking OSC Data**.
-  - Set **Avatar Measurement** to **Height**, then stand straight and use **Set Standing Height**.
+  - Set **Avatar Measurement** to **Height**.
 
 **VRChat on the PC (Person A):** add `--ignore-trackers=LHR-…,LHR-…` to the launch options, listing all of Person B's serials, including the calibration tracker.
 
@@ -61,7 +61,7 @@ Do this once, on the PC the trackers are connected to.
 
 **Trackers sit a constant distance below or above your controllers, or your feet are in the floor:**
 - **Likely cause:** VRChat's **Avatar Measurement** is set to **Arm Span**. VRChat then moves the world's floor up or down (about 20 cm in testing) and reports your headset and controllers relative to it. But it places incoming trackers relative to the real floor.
-- **Fix:** set Avatar Measurement to **Height**, then use **Set Standing Height**.
+- **Fix:** set Avatar Measurement to **Height**.
 
 **Trackers jump or turn after taking the headset off and on:** the Quest re-localised its tracking space.
 - With the calibration tracker on the headset, the bridge re-aligns within a couple of seconds.
