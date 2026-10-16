@@ -1,0 +1,25 @@
+# Copy to qsft.toml (not committed) and fill in. Command-line options override these.
+# Find serial numbers with: uv run python -m qsft.identify (shake a tracker to see its serial)
+
+[bridge]
+# Person B's body trackers, forwarded to VRChat as OSC trackers 1, 2, 3... in this order.
+trackers = ["LHR-00000000", "LHR-11111111", "LHR-22222222"]
+
+# The tracker mounted on the Quest Pro for calibration.
+calibration_tracker = "LHR-33333333"
+
+# The Quest's IP address. Optional: when empty, it's found via mDNS. Setting it makes the bridge
+# advertise on the network adapter that reaches the Quest (matters with VPN adapters).
+# quest_ip = "192.168.1.50"
+
+# This PC's LAN address to advertise. Optional: by default, the address on the route to the Quest.
+# lan_ip = "192.168.1.10"
+
+# UDP port to receive VRChat's OSC on. Optional: by default, any free port.
+# osc_port = 9101
+
+# How far ahead to extrapolate forwarded trackers, to hide Wi-Fi and VRChat delay (ms, default 30).
+# predict_ms = 30
+
+# How far VRChat's head pose runs ahead of real time (ms, default 40; measured on a Quest Pro).
+# head_lead_ms = 40

@@ -159,5 +159,7 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-qsft_log.txt
-qsft_config.ini
+# qsft
+qsft.toml
+recordings/
+calibration.json

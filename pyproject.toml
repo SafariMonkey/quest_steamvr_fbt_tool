@@ -1,0 +1,27 @@
+[project]
+name = "qsft"
+version = "0.1.0"
+description = "Forward SteamVR Lighthouse trackers to standalone Quest VRChat over OSC, calibrated to the Quest's tracking space"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.1",
+    "scipy>=1.14",
+    "openvr>=2.12.1401",
+    "python-osc>=1.9.3",
+    "python-oscquery>=0.4.0",
+    "zeroconf>=0.140",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
